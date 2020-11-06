@@ -17,10 +17,10 @@
 'use strict';
 
 class Log {
-  constructor(tag='', verbose=false, output=console) {
+  constructor(tag = '', verbose = false, output = console) {
     this.tag_ = tag;
     this.verbose_ = verbose;
-    this.prefix_ = this.inverse_(tag);
+    this.prefix_ = tag ? this.inverse_(tag) : '';
     this.output_ = output;
   }
 
@@ -31,8 +31,16 @@ class Log {
     this.log_(this.output_.log, this.dim_(message), args);
   }
 
+  log(message, ...args) {
+    this.info(message, ...args);
+  }
+
   info(message, ...args) {
     this.log_(this.output_.log, message, ...args);
+  }
+
+  success(message, ...args) {
+    this.log_(this.output_.log, this.green_('SUCCESS ' + message), args);
   }
 
   warn(message, ...args) {
@@ -45,7 +53,7 @@ class Log {
     this.output_.log('\n');
   }
 
-  verbose(isVerbose=true) {
+  verbose(isVerbose = true) {
     this.verbose_ = !!isVerbose;
   }
 
@@ -75,6 +83,10 @@ class Log {
     return `\x1b[36m${string}\x1b[0m`;
   }
 
+  green_(string) {
+    return `\x1b[32m${string}\x1b[0m`;
+  }
+
   yellow_(string) {
     return `\x1b[33m${string}\x1b[0m`;
   }
@@ -85,4 +97,3 @@ class Log {
 }
 
 module.exports = new Log();
-

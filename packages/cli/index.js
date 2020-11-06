@@ -17,14 +17,13 @@
 'use strict';
 
 const Cli = require('./lib/cli');
-const {log} = require('amp-toolbox-core');
+const {log} = require('@ampproject/toolbox-core');
 
 module.exports = () => {
   const cli = new Cli(log);
   const args = process.argv.slice(2);
-  cli.run(args)
-      .catch((err) => {
-        log.error(err.message);
-        process.exit(1);
-      });
+  cli.run(args).catch((err) => {
+    log.error(err.message);
+    process.exit(1);
+  });
 };

@@ -1,29 +1,23 @@
 {
-  "name": "amp-toolbox-cache-list",
-  "version": "0.1.6",
+  "name": "@ampproject/toolbox-cache-list",
+  "version": "2.5.1",
   "description": "Lists AMP Caches",
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ampproject/amp-toolbox.git"
+    "url": "git+https://github.com/ampproject/amp-toolbox.git",
+    "directory": "packages/cache-list"
   },
-  "keywords": [
-    "amp",
-    "amp-toolbox",
-    "amp-cache"
-  ],
-  "files": [
-    "index.js",
-    "lib"
-  ],
+  "keywords": ["amp", "amp-toolbox", "amp-cache"],
+  "files": ["index.js", "lib"],
   "author": "AMPHTML Team",
   "license": "Apache-2.0",
   "bugs": {
     "url": "https://github.com/ampproject/amp-toolbox/issues"
   },
-  "homepage": "https://github.com/ampproject/amp-toolbox/tree/master/packages/cache-list",
+  "homepage": "https://github.com/ampproject/amp-toolbox/tree/main/packages/cache-list",
   "dependencies": {
-    "amp-toolbox-core": "^0.1.6"
+    "@ampproject/toolbox-core": "^2.5.1"
   },
-  "gitHead": "058a60702136ac24dfd0a4f421877ed23aeee19f"
+  "gitHead": "d5517559fb1c2e1be4d3c3e9df756cdce82a432a"
 }

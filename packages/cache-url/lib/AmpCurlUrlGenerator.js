@@ -28,8 +28,7 @@ const LTR_CHARS =
   '\u200E\u2C00-\uFB1C\uFE00-\uFE6F\uFEFD-\uFFFF';
 
 /** @type {string} */
-const RTL_CHARS =
-  '\u0591-\u06EF\u06FA-\u07FF\u200F\uFB1D-\uFDFF\uFE70-\uFEFC';
+const RTL_CHARS = '\u0591-\u06EF\u06FA-\u07FF\u200F\uFB1D-\uFDFF\uFE70-\uFEFC';
 
 /** @type {RegExp} */
 const HAS_LTR_CHARS = new RegExp('[' + LTR_CHARS + ']');
@@ -72,14 +71,16 @@ const MAX_DOMAIN_LABEL_LENGTH_ = 63;
  */
 function createCurlsSubdomain(url) {
   // Get our domain from the passed url string
-  const domain = (new Url(url)).hostname;
+  const domain = new Url(url).hostname;
   if (isEligibleForHumanReadableCacheEncoding_(domain)) {
-    const curlsEncoding = constructHumanReadableCurlsCacheDomain_(domain);
+    let curlsEncoding = constructHumanReadableCurlsCacheDomain_(domain);
     if (curlsEncoding.length > MAX_DOMAIN_LABEL_LENGTH_) {
       return constructFallbackCurlsCacheDomain_(domain);
-    } else {
-      return Promise.resolve(curlsEncoding);
     }
+    if (hasInvalidHyphen34_(curlsEncoding)) {
+      curlsEncoding = constructCurlsCacheDomainForHyphen34_(curlsEncoding);
+    }
+    return Promise.resolve(curlsEncoding);
   } else {
     return constructFallbackCurlsCacheDomain_(domain);
   }
@@ -88,6 +89,7 @@ function createCurlsSubdomain(url) {
 /**
  * Determines whether the given domain can be validly encoded into a human
  * readable curls encoded cache domain.  A domain is eligible as long as:
+ *   It does not have hyphens in positions 3&4.
  *   It does not exceed 63 characters
  *   It does not contain a mix of right-to-left and left-to-right characters
  *   It contains a dot character
@@ -97,11 +99,15 @@ function createCurlsSubdomain(url) {
  * @private
  */
 function isEligibleForHumanReadableCacheEncoding_(domain) {
+  if (hasInvalidHyphen34_(domain)) {
+    return false;
+  }
   const unicode = punycode.toUnicode(domain);
-  return domain.length <= MAX_DOMAIN_LABEL_LENGTH_ &&
-    !(HAS_LTR_CHARS.test(unicode) &&
-      HAS_RTL_CHARS.test(unicode)) &&
-    domain.indexOf('.') != -1;
+  return (
+    domain.length <= MAX_DOMAIN_LABEL_LENGTH_ &&
+    !(HAS_LTR_CHARS.test(unicode) && HAS_RTL_CHARS.test(unicode)) &&
+    domain.indexOf('.') != -1
+  );
 }
 
 /**
@@ -135,7 +141,6 @@ function constructFallbackCurlsCacheDomain_(domain) {
   return sha256_(domain).then((digest) => encodeHexToBase32_(digest));
 }
 
-
 /**
  * Function to get a sha256 representation of the specified string.
  * This uses babel-plugin-filer-imports, so that the import
@@ -168,10 +173,8 @@ function encodeHexToBase32_(hexString) {
 
   const bitsPerHexChar = 4;
   const bitsPerBase32Char = 5;
-  const numInitialPaddingChars =
-      initialPadding.length * bitsPerHexChar / bitsPerBase32Char;
-  const numHexStringChars =
-      Math.ceil(hexString.length * bitsPerHexChar / bitsPerBase32Char);
+  const numInitialPaddingChars = (initialPadding.length * bitsPerHexChar) / bitsPerBase32Char;
+  const numHexStringChars = Math.ceil((hexString.length * bitsPerHexChar) / bitsPerBase32Char);
 
   const result = encodedString.substr(numInitialPaddingChars, numHexStringChars);
   return result;
@@ -194,29 +197,25 @@ function encode32_(paddedHexString) {
   // Split into groups of 5 and convert to base32.
   const base32 = 'abcdefghijklmnopqrstuvwxyz234567';
   const leftover = bytes.length % 5;
-  let quanta = Math.floor((bytes.length / 5));
+  let quanta = Math.floor(bytes.length / 5);
   const parts = [];
 
   if (leftover != 0) {
-    for (let i = 0; i < (5-leftover); i++) {
+    for (let i = 0; i < 5 - leftover; i++) {
       bytes += '\x00';
     }
     quanta += 1;
   }
 
   for (let i = 0; i < quanta; i++) {
-    parts.push(base32.charAt(bytes[i*5] >> 3));
-    parts.push(base32.charAt(((bytes[i*5] & 0x07) << 2)
-        | (bytes[i*5 + 1] >> 6)));
-    parts.push(base32.charAt(((bytes[i*5 + 1] & 0x3F) >> 1)));
-    parts.push(base32.charAt(((bytes[i*5 + 1] & 0x01) << 4)
-        | (bytes[i*5 + 2] >> 4)));
-    parts.push(base32.charAt(((bytes[i*5 + 2] & 0x0F) << 1)
-        | (bytes[i*5 + 3] >> 7)));
-    parts.push(base32.charAt(((bytes[i*5 + 3] & 0x7F) >> 2)));
-    parts.push(base32.charAt(((bytes[i*5 + 3] & 0x03) << 3)
-        | (bytes[i*5 + 4] >> 5)));
-    parts.push(base32.charAt(((bytes[i*5 + 4] & 0x1F))));
+    parts.push(base32.charAt(bytes[i * 5] >> 3));
+    parts.push(base32.charAt(((bytes[i * 5] & 0x07) << 2) | (bytes[i * 5 + 1] >> 6)));
+    parts.push(base32.charAt((bytes[i * 5 + 1] & 0x3f) >> 1));
+    parts.push(base32.charAt(((bytes[i * 5 + 1] & 0x01) << 4) | (bytes[i * 5 + 2] >> 4)));
+    parts.push(base32.charAt(((bytes[i * 5 + 2] & 0x0f) << 1) | (bytes[i * 5 + 3] >> 7)));
+    parts.push(base32.charAt((bytes[i * 5 + 3] & 0x7f) >> 2));
+    parts.push(base32.charAt(((bytes[i * 5 + 3] & 0x03) << 3) | (bytes[i * 5 + 4] >> 5)));
+    parts.push(base32.charAt(bytes[i * 5 + 4] & 0x1f));
   }
 
   let replace = 0;
@@ -229,6 +228,33 @@ function encode32_(paddedHexString) {
   for (let i = 0; i < replace; i++) parts.push('=');
 
   return parts.join('');
+}
+
+/**
+ * Determines if a domain or curls encoded proxy domain is allowed to have a
+ * hyphen in positions 3&4.
+ *
+ * @param {string} domainOrCurls A publisher domain or curls encoded proxy
+ *   domain
+ * @return {boolean}
+ * @private
+ */
+function hasInvalidHyphen34_(domainOrCurls) {
+  return domainOrCurls.slice(2, 4) == '--' && domainOrCurls.slice(0, 2) != 'xn';
+}
+
+/**
+ * Constructs a human readable curls for when the constructed curls has a
+ * hyphen in position 3&4.
+ *
+ * @param {string} curlsEncoding The curls encoded domain with hyphen in
+ *   position 3&4
+ * @return {string} The transformed curls encoded domain
+ * @private
+ */
+function constructCurlsCacheDomainForHyphen34_(curlsEncoding) {
+  const prefix = '0-';
+  return prefix.concat(curlsEncoding, '-0');
 }
 
 /** @module AmpCurlUrl */

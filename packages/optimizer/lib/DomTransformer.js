@@ -15,16 +15,32 @@
  */
 'use strict';
 
-const path = require('path');
-const treeParser = require('./TreeParser.js');
-const log = require('./log.js');
-const {oneBehindFetch} = require('amp-toolbox-core');
-const runtimeVersion = require('amp-toolbox-runtime-version');
+const treeParser = require('./TreeParser');
+const log = require('./log');
+let fetch = require('cross-fetch');
+const RuntimeVersion = require('@ampproject/toolbox-runtime-version/lib/RuntimeVersion');
+const fetchRuntimeParameters = require('./fetchRuntimeParameters');
 
 /**
  * AMP Optimizer Configuration only applying AMP validity perserving transformations.
  */
-const TRANSFORMATIONS_VALID_AMP = [
+const TRANSFORMATIONS_AMP_FIRST = [
+  // Adds missing AMP tags
+  'AddMandatoryTags',
+  // Optional Markdown compatibility
+  // needs to run before ServerSideRendering
+  'Markdown',
+  // Adds missing AMP extensions
+  'AutoExtensionImporter',
+  // Applies image optimizations, must run before PreloadHeroImage
+  'OptimizeImages',
+  // Detect hero image and preload link rel=preload
+  'PreloadHeroImage',
+  // Applies server-side-rendering optimizations
+  'ServerSideRendering',
+  // Removes the boilerplate
+  // needs to run after ServerSideRendering
+  'AmpBoilerplateTransformer',
   // Optimizes script import order
   // needs to run after ServerSideRendering
   'ReorderHeadTransformer',
@@ -32,15 +48,32 @@ const TRANSFORMATIONS_VALID_AMP = [
   'RewriteAmpUrls',
   'GoogleFontsPreconnect',
   'PruneDuplicateResourceHints',
+  // Move keyframes into a separate style tag
   'SeparateKeyframes',
+  'AddTransformedFlag',
+  // Removes unsupported nonce attribute from scripts
+  'RemoveCspNonce',
+  // Minifies HTML, JSON, inline amp-script
+  'MinifyHtml',
+  // Inject CSP script has required for inline amp-script
+  // needs to run after MinifyHtml which changes the inline script
+  'AmpScriptCsp',
 ];
 
 /**
- * AMP Optimizer Configuration applying all available AMP optimizations including Server-Side_Rendering.
+ * AMP Optimizer Configuration for transformations resulting in invalid AMP pages setting up paired AMP mode.
+ *
+ * @deprecated
  */
-const TRANSFORMATIONS_ALL = [
+const TRANSFORMATIONS_PAIRED_AMP = [
+  // Adds missing AMP extensions
+  'AutoExtensionImporter',
   // Adds a link to the valid AMP version
   'AddAmpLink',
+  // Applies image optimizations, must run before PreloadHeroImage
+  'OptimizeImages',
+  // Detect hero image and preload link rel=preload
+  'PreloadHeroImage',
   // Applies server-side-rendering optimizations
   'ServerSideRendering',
   // Removes ⚡ or 'amp' from the html tag
@@ -57,15 +90,20 @@ const TRANSFORMATIONS_ALL = [
   'PruneDuplicateResourceHints',
   'AddBlurryImagePlaceholders',
   'SeparateKeyframes',
+  'AddTransformedFlag',
+  // Minifies HTML, JSON, inline amp-script
+  'MinifyHtml',
+  // Inject CSP script has required for inline amp-script
+  // needs to run after MinifyHtml which changes the inline script
+  'AmpScriptCsp',
 ];
 
 const DEFAULT_CONFIG = {
+  fetch,
+  log,
+  transformations: TRANSFORMATIONS_AMP_FIRST,
   verbose: false,
-  validAmp: false,
-  fetch: oneBehindFetch,
-  runtimeVersion,
 };
-
 
 /**
  * Applies a set of transformations to a DOM tree.
@@ -76,35 +114,33 @@ class DomTransformer {
    * @param {Object} config - The config.
    * @param {Array.<Transformer>} config.transformers - a list of transformers to be applied.
    */
-  constructor(config=DEFAULT_CONFIG) {
+  constructor(config = DEFAULT_CONFIG) {
     this.setConfig(config);
-    this.log_ = log;
   }
 
   /**
    * Transforms an html string.
    * @param {string} html - a string containing valid HTML.
    * @param {Object} params - a dictionary containing transformer specific parameters.
+   * @return {string} - the transformed html string
    */
-  transformHtml(html, params) {
-    const tree = treeParser.parse(html);
-    return this.transformTree(tree, params)
-        .then(() => treeParser.serialize(tree));
+  async transformHtml(html, params) {
+    const tree = await treeParser.parse(html);
+    await this.transformTree(tree, params);
+    return treeParser.serialize(tree);
   }
 
   /**
    * Transforms a DOM tree.
    * @param {Tree} tree - a DOM tree.
-   * @param {Object} params - a dictionary containing transformer specific parameters.
+   * @param {Object} customParams - a dictionary containing transformer specific parameters.
    */
-  transformTree(tree, params) {
-    params = params || {};
-    log.verbose(params.verbose || false);
-    const sequence = (promise, transformer) => {
-      return promise.then(() => {
-        // not all transformers return a promise
-        return Promise.resolve(transformer.transform(tree, params, this.log_));
-      });
+  async transformTree(tree, customParams = {}) {
+    log.verbose(customParams.verbose || false);
+    const runtimeParameters = await fetchRuntimeParameters(this.config, customParams);
+    const sequence = async (promise, transformer) => {
+      await promise;
+      return transformer.transform(tree, runtimeParameters);
     };
     return this.transformers_.reduce(sequence, Promise.resolve());
   }
@@ -113,33 +149,35 @@ class DomTransformer {
    * Set the config.
    * @param {Object} config - The config.
    * @param {boolean} config.verbose - true if verbose mode should be enabled [default: false].
-   * @param {boolean} config.validAmp - true if AMP pages should stay valid [default: false].
-   * @param {Array.<Transformer>} config.transformers - a list of transformers to be applied [default: all available transformers].
+   * @param {Object} config.fetch - the fetch implementation to use.
+   * @param {Array.<Transformer>} config.transformations - a list of transformers to be applied.
    */
   setConfig(config) {
-    config = Object.assign({}, DEFAULT_CONFIG, config);
-    log.verbose(config.verbose);
-    this.initTransformers_(config);
+    this.config = Object.assign({}, DEFAULT_CONFIG, config);
+    if (!this.config.runtimeVersion) {
+      // Re-use custom fetch implementation for runtime version provider
+      this.config.runtimeVersion = new RuntimeVersion(this.config.fetch);
+    }
+    log.verbose(this.config.verbose);
+    this.initTransformers_(this.config);
   }
 
+  /**
+   * @private
+   */
   initTransformers_(config) {
-    this.transformers_ = this.getTransformersFromConfig_(config).map((Transformer) => {
+    this.transformers_ = config.transformations.map((Transformer) => {
       if (typeof Transformer === 'string') {
-        Transformer = require(path.join(__dirname, 'transformers', Transformer + '.js'));
+        Transformer = require(`./transformers/${Transformer}.js`);
       }
       return new Transformer(config);
     });
   }
-
-  getTransformersFromConfig_(config) {
-    if (config.transformers) {
-      return config.transformers;
-    }
-    if (config.validAmp) {
-      return TRANSFORMATIONS_VALID_AMP;
-    }
-    return TRANSFORMATIONS_ALL;
-  }
 }
 
-module.exports = DomTransformer;
+module.exports = {
+  DomTransformer,
+  DEFAULT_CONFIG,
+  TRANSFORMATIONS_AMP_FIRST,
+  TRANSFORMATIONS_PAIRED_AMP,
+};

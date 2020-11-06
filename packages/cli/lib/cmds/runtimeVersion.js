@@ -16,11 +16,16 @@
 
 'use strict';
 
-const ampRuntimeVersionProvider = require('amp-toolbox-runtime-version');
+const ampRuntimeVersionProvider = require('@ampproject/toolbox-runtime-version');
 
-async function runtimeVersion(_, logger) {
-  const version = await ampRuntimeVersionProvider.currentVersion();
-  logger.info(version);
-};
+async function runtimeVersion(args, logger) {
+  const {canary, host, lts} = args;
+  const version = await ampRuntimeVersionProvider.currentVersion({
+    ampUrlPrefix: host,
+    canary,
+    lts,
+  });
+  logger.info(version || '');
+}
 
 module.exports = runtimeVersion;

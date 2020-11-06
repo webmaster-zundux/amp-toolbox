@@ -19,30 +19,31 @@
 const UpdateCacheUrlProvider = require('../lib/UpdateCacheUrlProvider');
 
 const signature = {generate: () => 'RESULT_SIGNATURE'};
-const caches = {list: () => Promise.resolve([
-  {id: 'test', name: 'Test', updateCacheApiDomainSuffix: 'test.com'},
-  {id: 'example', name: 'Example', updateCacheApiDomainSuffix: 'example.com'},
-])};
+const caches = {
+  list: () =>
+    Promise.resolve([
+      {id: 'test', name: 'Test', updateCacheApiDomainSuffix: 'test.com'},
+      {id: 'example', name: 'Example', updateCacheApiDomainSuffix: 'example.com'},
+    ]),
+};
 
 describe('UpdateCacheUrlProvider', () => {
   const updateCacheUrl = new UpdateCacheUrlProvider(signature, caches);
 
   describe('calculateFromCacheUrl', () => {
-    it('Generates the correct signature', (done) => {
+    it('Generates the correct signature', () => {
       const timestamp = 1;
       updateCacheUrl.calculateFromCacheUrl('https://test.com', timestamp).then((result) => {
         const expected =
           'https://test.com/update-cache/?amp_action=flush&amp_ts=1&amp_url_signature=RESULT_SIGNATURE';
         expect(result).toBe(expected);
-        done();
       });
     });
 
-    it('Generates signature with default timestamp', (done) => {
+    it('Generates signature with default timestamp', () => {
       updateCacheUrl.calculateFromCacheUrl('https://test.com').then((result) => {
         const regex = /amp_ts=\d+/;
         expect(result).toMatch(regex);
-        done();
       });
     });
   });
@@ -50,12 +51,11 @@ describe('UpdateCacheUrlProvider', () => {
   describe('calculateFromOriginUrl', () => {
     it('Generates update cache URL for each known cache', () => {
       const timestamp = 1;
-      updateCacheUrl.calculateFromOriginUrl('https://test.com', timestamp)
-          .then((result) => {
-            expect(result.length).toBe(2);
-            expect(result[0].cacheId).toBe('test');
-            expect(result[1].cacheId).toBe('example');
-          });
+      updateCacheUrl.calculateFromOriginUrl('https://test.com', timestamp).then((result) => {
+        expect(result.length).toBe(2);
+        expect(result[0].cacheId).toBe('test');
+        expect(result[1].cacheId).toBe('example');
+      });
     });
   });
 });

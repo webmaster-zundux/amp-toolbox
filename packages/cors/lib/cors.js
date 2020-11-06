@@ -15,13 +15,14 @@
  */
 'use strict';
 
-const Caches = require('amp-toolbox-cache-list');
-const createCacheSubdomain = require('amp-toolbox-cache-url').createCurlsSubdomain;
-const log = require('amp-toolbox-core').log.tag('AMP CORS');
+const Caches = require('@ampproject/toolbox-cache-list');
+const createCacheSubdomain = require('@ampproject/toolbox-cache-url').createCurlsSubdomain;
+const log = require('@ampproject/toolbox-core').log.tag('AMP CORS');
 const url = require('url');
 
 // the default options
 const DEFAULT_OPTIONS = {
+  email: false,
   allowCredentials: true,
   enableAmpRedirectTo: true,
   sourceOriginPattern: false,
@@ -31,18 +32,25 @@ const DEFAULT_OPTIONS = {
 
 /**
  * Creates a middleware automatically adding AMP CORS headers to requests initiated by the AMP
- * runtime. See also https://www.ampproject.org/docs/fundamentals/amp-cors-requests.
+ * runtime. See also https://amp.dev/documentation/guides-and-tutorials/learn/amp-caches-and-cors/amp-cors-requests/.
  *
  * @param {Object} options
  * @param {RegExp} [options.sourceOriginPattern=false] regex matching allowed source origins
  * @param {boolean} [options.verbose=false] verbose logging output
+ * @param {boolean} [options.email=false] add additional CORS headers for AMP for Email
  * @param {boolean} [options.verifyOrigin=true] verify origins to match official AMP caches.
  * @param {Caches} [caches=new Caches()]
  * @return {Function} next middleware function
  */
-module.exports = (options, caches=new Caches()) => {
+module.exports = (options, caches = new Caches()) => {
   options = Object.assign(DEFAULT_OPTIONS, options);
   log.verbose(options.verbose);
+  if (options.email === true) {
+    // email origins cannot be verified
+    options.verifyOrigin = false;
+    // email doesn't support AMP-Redirect-To
+    options.enableAmpRedirectTo = false;
+  }
   return async (request, response, next) => {
     // Get source origin from query
     const sourceOrigin = url.parse(request.url, true).query.__amp_source_origin;
@@ -69,21 +77,26 @@ module.exports = (options, caches=new Caches()) => {
     }
 
     // Check if origin is a valid AMP cache
-    if (originHeaders.origin &&
-        options.verifyOrigin &&
-        !await isValidOrigin(originHeaders.origin, sourceOrigin)) {
+    if (
+      originHeaders.origin &&
+      options.verifyOrigin &&
+      !(await isValidOrigin(originHeaders.origin, sourceOrigin))
+    ) {
       log.warn('invalid Origin', originHeaders.origin);
       response.status(403).end(); // forbidden
       return;
     }
     // Add CORS and AMP CORS headers
     response.setHeader('Access-Control-Allow-Origin', originHeaders.origin || sourceOrigin);
-    const headersToExpose = ['AMP-Access-Control-Allow-Source-Origin'];
+    const headersToExpose = [];
     if (options.enableAmpRedirectTo) {
       headersToExpose.push('AMP-Redirect-To');
     }
+    if (options.email) {
+      headersToExpose.push('AMP-Access-Control-Allow-Source-Origin');
+      response.setHeader('AMP-Access-Control-Allow-Source-Origin', sourceOrigin);
+    }
     response.setHeader('Access-Control-Expose-Headers', headersToExpose);
-    response.setHeader('AMP-Access-Control-Allow-Source-Origin', sourceOrigin);
     if (options.allowCredentials) {
       response.setHeader('Access-Control-Allow-Credentials', 'true');
     }
@@ -98,24 +111,27 @@ module.exports = (options, caches=new Caches()) => {
    * @private
    */
   function extractOriginHeaders_(headers) {
-    const result = {
-      isSameOrigin: false,
-    };
+    const normalizedHeaders = {};
+
     for (const key in headers) {
       if (headers.hasOwnProperty(key)) {
-        const normalizedKey = key.toLowerCase();
-        // for same-origin requests where the Origin header is missing, AMP sets the amp-same-origin header
-        if (normalizedKey === 'amp-same-origin') {
-          result.isSameOrigin = true;
-          return result;
-        }
-        // use the origin header otherwise
-        if (normalizedKey === 'origin') {
-          result.origin = headers[key];
-          return result;
-        }
+        normalizedHeaders[key.toLowerCase()] = headers[key];
       }
     }
+
+    // for same-origin requests AMP sets the amp-same-origin header
+    if ('amp-same-origin' in normalizedHeaders) {
+      return {
+        isSameOrigin: true,
+      };
+    } else if ('origin' in normalizedHeaders) {
+      // use the origin header otherwise
+      return {
+        isSameOrigin: false,
+        origin: normalizedHeaders.origin,
+      };
+    }
+
     return null;
   }
 

@@ -1,119 +1,467 @@
 # AMP Optimizer
 
-[![npm version](https://badge.fury.io/js/amp-toolbox-optimizer.svg)](https://badge.fury.io/js/amp-toolbox-optimizer)
+[![npm version](https://badge.fury.io/js/%40ampproject%2Ftoolbox-optimizer.svg)](https://badge.fury.io/js/%40ampproject%2Ftoolbox-optimizer)
 
-AMP Optimizer - the performance optimizations of the AMP Cache on your own site.
+AMP Optimizer is a tool to simplify creating AMP pages and improve AMP rendering performance. AMP Optimizer implements [AMP performance best practices](https://amp.dev/documentation/guides-and-tutorials/optimize-and-measure/optimize_amp?format=websites) and supports [AMP server-side-rendering](https://amp.dev/documentation/guides-and-tutorials/optimize-and-measure/server-side-rendering?format=websites). By default, it will perform the following optimizations:
 
-![AMP Optimizer in Action](https://user-images.githubusercontent.com/380472/36001450-96cfbce2-0d26-11e8-8b65-4ffc3182d57c.gif)
+- [Server-side render AMP layouts](https://amp.dev/documentation/guides-and-tutorials/optimize-and-measure/server-side-rendering/).
+- **Automatically import all missing AMP component scripts**.
+- **Automatically add any missing mandatory AMP tags**.
+- Auto detects and preloads hero images from amp-img, amp-iframe, amp-video, or amp-video-iframe.
+- Remove the AMP boilerplate (when possible).
+- Remove not needed whitespace.
+- Extract and move CSS keyframe animations to the bottom of the page.
+- Optimize AMP framework and custom font loading
+- Generate CSP for inlined [`amp-script`](https://amp.dev/documentation/components/amp-script/) code.
 
-First Render - 3.0 seconds vs 4.8 seconds (37% faster) <br>
-Visually Complete - 3.7 seconds vs 6.4 seconds (42% faster) <br>
+The performance optimizations can improve page rendering times by up to 50%. You can read more about the potential performance gains in this [blog post](https://blog.amp.dev/2018/10/08/how-to-make-amp-even-faster/). To give it a try, check out [the online playground](https://toolbox-optimizer.glitch.me/).
 
-www.ampproject.org
+**Good to know:**
 
-## Introduction
-
-AMP Optimizer optimizes AMPHTML files by: 
-
-* Server-side rendering AMP layouts.
-* Removing the AMP boilerplate.
-* Pre-loading the AMP `v0.js` runtime to benefit from H2 push.
-* Versioning AMP runtime and extension imports.
-* Inlining critical CSS.
-
-You can find the currently supported transformations [here](lib/transformers).
-
-**Warning: optimized AMPs will no longer be valid AMPHTML. Don't use this to optimize AMPs meant for being used by platforms such as Google Search.**
-
-## Table of Contents
-
-- [Introduction](#introduction)
-- [Background](#background)
-- [Usage](#usage)
-  - [Options](#options)
-  - [Versioned AMP Runtime](##versioned-amp-runtime)
-- [Example](#example)
-- [Best Practices](#best-practices)
-  - [Transform AMP pages at build time if possible](#transform-amp-pages-at-build-time-if-possible)
-  - [Cache transformed AMPs](#cache-transformed-amps)
-- [Why is it faster?](#why-is-it-faster)
-- [Caveats](#caveats)
-- [Version History](#version-history)
-
-## Background
-
-The [Google AMP Cache](https://developers.google.com/amp/cache/overview#cache-optimizations-and-modifications) performs additional optimizations to make AMP pages load even faster. You can find out more about these optimizations [here](https://github.com/ampproject/amphtml/issues/7022) and [here](https://github.com/ampproject/amphtml/issues/8566). This project provides a Node.js based implementation of the same set of transformations performed by the Google AMP Cache. This serves two goals:
-
-* Enable faster loading times for canonical AMP sites.
-* Provide a reference implementation for other AMP caches.
+- AMP Optimizer will produce valid AMP.
+- AMP Optimizer can be used in combination with [AMP Packager](https://github.com/ampproject/amppackager) to create SXGs.
 
 ## Usage
+
+### API
 
 Install via:
 
 ```
-npm install amp-toolbox-optimizer
+npm install @ampproject/toolbox-optimizer
 ```
 
 Minimal usage:
 
 ```js
-const ampOptimizer = require('amp-toolbox-optimizer');
+const AmpOptimizer = require('@ampproject/toolbox-optimizer');
 
-// Transformer expects a string (streams are not supported)
+const ampOptimizer = AmpOptimizer.create();
+
 const originalHtml = `
 <!doctype html>
 <html ⚡>
-...
-`
+  ...
+</html>`;
 
-// Additional options can be passed as the second argument
-ampOptimizer.transformHtml(originalHtml, {
-  ampUrl: 'canonical.amp.html'
-}).then(optimizedHtml => {
+ampOptimizer.transformHtml(originalHtml).then((optimizedHtml) => {
   console.log(optimizedHtml);
 });
-
 ```
 
-You can find a sample implementation [here](demo/simple/). If you're using the express middleware in your backend, it's best to use the [AMP Optimizer Middleware](../optimizer-express).
+You can find a sample implementation [here](/packages/optimizer/demo/simple). If you're using express to serve your site, you can use the [AMP Optimizer Middleware](/packages/optimizer-express).
+
+### CLI
+
+AMP Optimizer can be used via the [AMP Toolbox CLI](/packages/cli/README.md):
+
+```shell
+$ npm install @ampproject/toolbox-cli -g
+$ amp optimize myFile.html
+```
+
+or run without installation via `npx`:
+
+```shell
+$ npx @ampproject/toolbox-cli optimize myFile.html
+```
 
 ### Options
 
-Currently the following options are supported:
+Options are passed when creating a new AMP Optimizer instance:
 
-* **ampUrl**: an URL string pointing to the valid AMP version. Required by the AddAmpLink transformer.
-* **blurredPlaceholders**: enables blurry image placeholder generation. Default is `false`. This transforms requires install `jimp` and `lru-cache`: `npm install jimp lru-cache` **Important:** blurry image placeholder computation is expensive. Make sure to only use it for static or cached pages.
-* **imageBasePath**: a base URL or path required for resolving an image file from a given image `src` attribute. Used by for blurry image placeholder generation.
-* **maxBlurredPlaceholders**: specifies the max number of blurred images. Defaults to 5.
-* **ampRuntimeVersion** specifies a [specific version](https://github.com/ampproject/amp-toolbox/tree/master/runtime-version") of the AMP runtime. For example: `ampRuntimeVersion: "001515617716922"` will result in AMP runtime URLs being re-written from:
+```js
+const ampOptimizer = AmpOptimizer.create({
+  verbose: true
+});
+...
+```
 
-  ```
-  https://cdn.ampproject.org/v0.js
-  ```
+Available options are:
 
-  to:
+- [autoAddMandatoryTags](#autoaddmandatorytags)
+- [autoExtensionImport](#autoextensionimport)
+- [fetch](#fetch)
+- [format](#format)
+- [imageBasePath](#imagebasePath)
+- [imageOptimizer](#imageoptimizer)
+- [lts](#lts)
+- [markdown](#markdown)
+- [minify](#minify)
+- [preloadHeroImage](#preloadheroimage)
+- [verbose](#verbose)
 
-  ```
-  https://cdn.ampproject.org/rtv/001515617716922/v0.js
-  ```
-* **ampUrlPrefix (experimental)**: specifies an URL prefix for AMP runtime
-  URLs. For example: ```ampUrlPrefix: "/amp"` will result in AMP runtime
-  URLs being re-written from:
+#### `autoAddMandatoryTags`
 
-  ```
-  https://cdn.ampproject.org/v0.js
-  ```
+Automatically inject any missing markup required by AMP.
 
-  to:
+- name: `autoAddMandatoryTags`
+- valid options: `[true|false]`
+- default: `true`
+- used by: [AddMandatoryTags](lib/transformers/AddMandatoryTags.js)
 
-  ```
-  /amp/v0.js
-  ```
+#### `autoExtensionImport`
+
+Automatically import any missing AMP Extensions (e.g. amp-carousel).
+
+- name: `autoExtensionImport`
+- valid options: `[true|false]`
+- default: `true`
+- used by: [AutoExtensionImport](lib/transformers/AddMandatoryTags.js)
+
+#### `fetch`
+
+Provide a custom fetch handler. You can use this option to configure a custom proxy server. Example:
+
+```js
+const nodeFetch = require('node-fetch');
+
+const proxyHost = '...';
+const proxyPort = '...';
+
+const fetch = (url, opts={}) => {
+  opts.agent = new HttpsProxyAgent(`${proxyHost}:${proxyPort}');
+  return nodeFetch(url, opts)
+}
+const optimizer = AmpOptimizer.create({
+  fetch,
+});
+```
+
+- name: `fetch`
+- valid options: a [whatwg fetch](https://github.com/whatwg/fetch) compatible fetch implementation.
+- default: [node-fetch](https://www.npmjs.com/package/node-fetch)
+
+#### `format`
+
+Specifies the AMP format of the input file. Defaults to `AMP`.
+
+- name: `format`
+- valid options: `[AMP|AMP4EMAIL|AMP4ADS]`
+- default: `AMP`
+- used by: [AutoExtensionImport](lib/transformers/AddMandatoryTags.js), [AddMandatoryTags](lib/transformers/AddMandatoryTags.js)
+
+#### `imageBasePath`
+
+Specifies a base path used to resolve an image during build,
+this can be a file system path or URL prefix. You can also pass a function
+`(imgSrc, params) => '../img/' + imgSrc` for dynamically calculating the image path.
+
+- name: `imageBasePath`
+- valid options: `STRING|FUNCTION`
+- default: undefined
+- used by: [Markdown](lib/transformers/Markdown.js)
+
+#### `imageOptimizer`
+
+Enable automated image `srcset` generation by providing a function for calculating `srcset` URLs for a given image `src`. The function should return a URL pointing to a version of the `src` image with the given `width`. If no image is available, it should return a falsy value.
+
+Example:
+
+```js
+const ampOptimizer = AmpOptimizer.create({
+  imageOptimizer: (src, width) => `${src}?width=${width}`
+});
+```
+
+- name: `imageOptimizer`
+- valid options: `FUNCTION`
+- default: undefined
+- used by: [OptimizeImages](lib/transformers/OptimizeImages.js)
+
+#### `lts`
+
+Use [long-term stable URLs](https://github.com/ampproject/amphtml/blob/main/contributing/lts-release.md) for downloading the AMP runtime and components.
+
+- name: `lts`
+- valid options: `[true|false]`
+- default: `false`
+- used by: [RewriteAmpUrls](lib/transformers/RewriteAmpUrls.js)
+
+#### `markdown`
+
+This transformer adds out-of-the-box markdown support. This allows
+using AMP Optimizer to convert HTML documents created from Markdown
+files into valid AMP. A typical conversion flow would be:
+
+README.md => HTML => AMP Optimizer => valid AMP
+
+The only thing this transformer does is converting `<img>` tags into
+either `amp-img` or `amp-anim` tags. All other Markdown features are
+already supported by AMP. The transformer will try to resolve image
+dimensions from the actual files. Images larger than 320px will automatically
+get an intrinsic layout. For image detection to work, an optional dependency
+`probe-image-size` needs to be installed via NPM.
+
+- name: `markdown`
+- valid options: `[true|false]`
+- default: `false`
+- used by: [Markdown](lib/transformers/Markdown.js)
+
+#### `minify`
+
+Minifies the generated HTML output and inlined CSS.
+
+- name: `minify`
+- valid options: `[true|false]`
+- default: `true`
+- used by: [MinifyHtml](lib/transformers/MinifyHtml.js), [SeparateKeyframes[(lib/transformers/SeparateKeyframes.js)
+
+#### `preloadHeroImage`
+
+Auto detect hero images for amp-img, amp-iframe, amp-video, or amp-video-iframe and injects a `link rel=preload`. Preloads will only be generated if there is no existing image preload.
+
+- name: `preloadHeroImage`
+- valid options: `[true|false]`
+- default: `true`
+- used by: [PreloadHeroImage](lib/transformers/PreloadHeroImage.js)
+
+#### `verbose`
+
+Enable verbose mode with more detailed logging output.
+
+- name: `verbose`
+- valid options: `[true|false]`
+- default: `false`
+
+## Features
+
+### Image optimization
+
+AMP Optimizer helps you serve optimized images. For this to work, you need to provide a function that maps an image `src` to a resized `srcset` source value. The image resizing needs to either happen at build time (e.g. for static sites) or via a image hosting service such as [thumbor](https://github.com/thumbor/thumbor).
+
+Here is an example implementation that appends the image width to the `src`:
+
+```js
+const ampOptimizer = AmpOptimizer.create({
+  // parameters are the amp-img `src` and the `width` of the to be generated srcset source value
+  imageOptimizer: (src, width) => {
+    // we cannot rename if the image does not have a file extension
+    const index = src.lastIndexOf('.');
+    if (index === -1) {
+      // return null means we won't generate a srcset source value for this width
+      return null;
+    }
+    const prefix = src.substring(0, index);
+    const postfix = src.substring(index, src.length);
+    return `${prefix}.${width}w${postfix}`;
+  };
+})
+```
+
+Using this implementation, AMP Optimizer will transform the following `amp-img` declarations:
+
+```html
+<!-- Injects srcset for responsive layout -->
+<amp-img src="image1.png" width="400" height="800" layout="responsive"></amp-img>
+<!-- Ignores existing srcset -->
+<amp-img layout=fill srcset="image-1x.png 1x,
+                             image-2x.png 2x"></amp-img>
+```
+
+into:
+
+```html
+<!-- Injects srcset for responsive layout -->
+<amp-img src="image1.png" width="400" height="800" layout="responsive" srcset="image1.470w.png 470w, image1.820w.png 820w, image1.1440w.png 1440w"></amp-img>
+<!-- Ignores existing srcset -->
+<amp-img layout="fill" srcset="image-1x.png 1x,
+                               image-2x.png 2x"></amp-img>
+```
+
+**Important** when using `layout=responsive` use the `width` and `height` attribute to specify the minimum image dimensions. For example, for a full-bleed hero image on mobile, specify the width as`width=320`.
+
+### Auto add incomplete markup
+
+It's possible to pass incomplete documents and AMP Optimizer will add any
+missing tags and extension imports required by a valid AMP document.
+
+```js
+const originalHtml = `
+  <h1>Hello World!</h1>
+  <amp-twitter width="375"
+               height="472"
+               layout="responsive"
+               data-tweetid="1182321926473162752">
+  </amp-twitter>
+`;
+
+// you can pass the canonical URL, default is `.`
+const opts = {
+  canonical: '/example.html'
+}
+ampOptimizer.transformHtml(originalHtml, opts).then((optimizedHtml) => {
+  // optimizedHtml will be a valid AMP document
+  console.log(optimizedHtml);
+});
+```
+
+### Automated Markdown conversion
+
+AMP Optimizer supports converting Markdown to AMPHTML. A typical conversion flow would be:
+
+```
+README.md => HTML => AMP Optimizer => valid AMP
+```
+
+The AMP Optimizer converts `<img>` tags into `<amp-img>` or `<amp-anim>` tags when in Markdown mode. Enable Markdown mode via `markdown : true`. AMP Optimizer will try to resolve image dimensions from the actual files. Images wider than 320px will automatically get an `intrinsic` layout.
+
+All other Markdown features are already supported by AMP.
+
+You can pass an additional option `imageBasePath` to specify a base path used to resolve an image during build, this can be a file system path or URL prefix.
+
+**Important:** for image size detection to work, an optional dependency
+`probe-image-size` needs to be installed via NPM.
+
+```shell
+npm install probe-image-size --save-dev
+```
+
+Example:
+
+```js
+const AmpOptimizer = require('@ampproject/toolbox-optimizer');
+const md = require('markdown-it')({
+  // don't sanitize html if you want to support AMP components in Markdown
+  html: true,
+});
+
+// enable markdown mode
+const ampOptimizer = AmpOptimizer.create({
+  markdown: true,
+});
+
+const markdown = `
+# Markdown 🤯
+
+Here is an image declared in Markdown syntax:
+
+![A random image](https://unsplash.it/800/600).
+
+You can directly declare AMP components:
+
+<amp-twitter width="375"
+             height="472"
+             layout="responsive"
+             data-tweetid="1182321926473162752">
+</amp-twitter>
+
+Any missing extensions will be automatically imported.
+`;
+
+const html = md.render(markdown);
+
+const amphtml = await ampOptimizer.transformHtml(html, {
+  canonical: filePath,
+});
+```
+
+You can find a working sample [here](/packages/optimizer/demo/markdown).
+
+## Extending AMP Optimizer with custom transformations
+
+AMP Optimizer supports custom HTML transformations:
+
+```js
+const AmpOptimizer = require('@ampproject/toolbox-optimizer');
+const {createElement, firstChildByTag, appendChild} = AmpOptimizer.NodeUtils;
+
+class CustomTransformer {
+  constructor(config) {
+    this.log_ = config.log.tag('CUSTOM');
+  }
+  transform(tree, params) {
+    this.log_.info('Running custom transformation for ', params.filePath);
+    const html = firstChildByTag(tree, 'html');
+    if (!html) return;
+    const head = firstChildByTag(html, 'head');
+    if (!head) return;
+    const desc = createElement('meta', {
+      name: 'description',
+      content: 'this is just a demo',
+    });
+    appendChild(head, desc);
+  }
+}
+
+// it's best to run custom transformers first
+const customTransformations = [CustomTransformer, ...AmpOptimizer.TRANSFORMATIONS_AMP_FIRST];
+
+// pass custom transformers when creating the optimizer
+const optimizer = AmpOptimizer.create({
+  transformations: customTransformations,
+});
+// you can add custom parameters on a per document basis
+const transformedHtml = await optimizer.transformHtml(html, {
+  filePath,
+});
+```
+
+Checkout [the samples](/packages/optimizer/demo/simple/index.js) to learn how to customize AMP Optimizer.
+
+## Best Practices
+
+### Make sure to enable AMP Boilerplate removal
+
+The biggest performance gain results from [removing the AMP boilerplate code](https://amp.dev/documentation/guides-and-tutorials/optimize-and-measure/server-side-rendering/#why-is-it-faster?). However, under some circumstances it's not possible to remove the boilerplate code:
+
+- if the`amp-experiment`, `amp-story` or `amp-dynamic-css-classes` components are used ([code](https://github.com/ampproject/amphtml/blob/62a9eab084ccd800d80a371e2cb29cd4f9e8576a/src/render-delaying-services.js#L39-L43)).
+
+To find out, why the AMP boilerplate could not be removed, enable `verbose` mode:
+
+```js
+// globally
+const optimizer = ampOptimizer.create({
+  verbose: true
+} );
+```
+
+... or for individual pages:
+
+```js
+// per transformation
+ampOptimizer.transformHtml(originalHtml, {
+  verbose: true
+})
+```
+
+### Transform AMP pages at build time if possible
+
+Applying the transformations to an AMP file consumes additional server resources. Also, since the entire file is needed to apply the transformations, it also becomes impossible to stream the response while applying it. In order to avoid server overhead, if the set of AMP files to be transformed is known in advance, transformations should be run at build time.
+
+### Cache transformed AMPs at runtime
+
+Most websites have a more dynamic nature though and are not able to apply the transformations statically. For such cases it is possible to run the transformations after AMP pages are rendered, e.g. in an Express middleware. In that case, to achieve best performance, it's best to cache transformed pages for subsequent requests. Caching can take place on the CDN level, on the site's internal infrastructure (eg: Memcached), or even on the server itself, if the set of pages is small enough to fit in memory.
+
+### Regenerate pages at least once a week
+
+AMP Optimizer inlines CSS styles required by AMP. To make sure, that the inlined CSS stays in sync with the latest AMP release, we recommend to re-generate pages at least once a weekOut-of-sync CSS will not break your page, but it could theoretically cause AMP components to briefly appear with the "wrong" styles, such as being visible when they should be hidden. The good news is that these glitches will only be temporary, because as soon as the AMP JS starts, it will check the inlined CSS and update it if required.
+
+## Experimental Features
+
+**Warning: these features are experimental and might result in invalid AMP pages.**
+
+### Paired AMP
+
+When using experimental features resulting in invalid AMP it's best to setup paired AMP mode. Paired AMP mode will add `<link rel=amphtml href=${ampUrl}>` to the transformed page, were `ampUrl` needs to point to the valid version of this page.
+
+Example:
+
+```js
+const optimizer = AmpOptimizer.create({
+  transformations: AmpOptimizer.TRANSFORMATIONS_PAIRED_AMP,
+});
+const ampFilePath = filePath.substring(1, filePath.length)
+    .replace('.html', '.amp.html');
+const transformedHtml = await optimizer.transformHtml(html, {
+  // needed to calculate the `<link rel=amphtml href=${ampUrl}>`
+  ampUrl: ampFilePath,
+});
+```
 
 ### Versioned AMP Runtime
 
-The `ampRuntimeVersion` parameter will rewrite all AMP runtime and extension imports to the specified version. For example: 
+The `ampRuntimeVersion` parameter will rewrite all AMP runtime and extension imports to the specified version. For example:
 
 ```
 https://cdn.ampproject.org/v0.js
@@ -125,22 +473,14 @@ will be replaced with:
 https://cdn.ampproject.org/rtv/001515617716922/v0.js
 ```
 
-Versioning the AMP runtime URLs has two benefits:
+Versioning the AMP runtime URLs has one main benefit: versioned AMP runtime URLs are served with a longer max-age than the unversioned ones. This means AMP pages served with versioned AMP runtime benefit from better browser caching.
 
-1. Better usage of the brower cache: versioned AMP runtime URLs are served with a longer max-age than the unversioned ones.
-2. Critical CSS can be inlined. The AMP runtime defines it's [own CSS styles](https://cdn.ampproject.org/v0.css) for AMP layouts and other things. Versioning the AMP runtime makes it possible to inline these styles, which greatly improving time to FCP as it ensures that inlined styles and imported runtime are compatible.
+**Important:** when using versioned AMP runtime URLs make sure to invalidate all caches whenever a new AMP runtime is released. This is to ensure that your AMP pages always use the latest version of the AMP runtime.
 
-**Important:** when using versioned AMP runtime URLs make sure to invalidate all caches whenever a new AMP runtime is released. This is to ensure that your AMP pages always use the latest version of the AMP runtime.  
+You can use [@ampproject/toolbox-runtime-version](/packages/runtime-version) to retrieve the latest version of the AMP runtime. Here is a sample to apply the optimizations including versioning the URLs:
 
-You can use [amp-toolbox-runtime-version](../amp-toolbox-runtime-version) to retrieve the latest version of the AMP runtime. Here is a sample to apply the optimizations including versioning the URLs:
-
-```
-const ampOptimiser = require('amp-toolbox-optimizer');
-
-// retrieve the latest runtime version
-const runtimeVersion = require('amp-toolbox-runtime-version');
-
-// retrieve the latest version
+```js
+const ampOptimizer = require('@ampproject/toolbox-optimizer');
 const ampRuntimeVersion = await runtimeVersion.currentVersion();
 
 // The input string
@@ -159,134 +499,111 @@ const optimizedHtml = await ampOptimizer.transformHtml(originalHtml, {
 console.log(optimizedHtml);
 ```
 
-## Example
+### Blurry image placeholders
 
-The following valid AMPHTML:
+Add placeholders for `amp-img` and `amp-video` posters. The placeholders are blurry versions of the corresponding original source. The blur will be displayed as the `<amp-img>` is rendering, and will fade out once the element is loaded. The current requirements of appending a blurry placeholder is for the element is to be a JPEG that is either responsive or a poster for an `amp-video`.
 
-```html
+**Important: blurry image placeholder computation is computationally expensive. Make sure to only use it for static or cached pages.**
+
+This transformer supports the following options:
+
+- `blurredPlaceholders`: Enables blurry image placeholder generation. Default is `false`.
+- `imageBasePath`: specifies a base path used to resolve an image during build.
+- `maxBlurredPlaceholders`: Specifies the max number of blurred images. Defaults to 5.
+- `blurredPlaceholdersCacheSize`: Specifies the max number of blurred images to be cached
+  to avoid expensive recalculation. Set to 0 if caching should be disabled. Set to -1 if
+  all placeholders should be cached (good for static sites). Defaults to 30.
+
+Usage:
+
+```js
+const optimizer = AmpOptimizer.create({
+  // blurry image placeholders are currently not considered valid AMP
+  // hence it's recommended to setup paired AMP mode when enabling this feature.
+  transformations: AmpOptimizer.TRANSFORMATIONS_PAIRED_AMP,
+  blurredPlaceholders: true,
+});
+```
+
+### Self-hosted AMP components
+
+It's possible to rewrite the AMP framework and component imports to a different domain than `cdn.ampproject.org`.
+
+Example:
+
+```js
+const ampOptimizer = require('@ampproject/toolbox-optimizer');
+
+// The input string
+const originalHtml = `
 <!doctype html>
 <html ⚡>
-<head>
-  <meta charset="utf-8">
-  <link rel="canonical" href="canonical.html" />
-  <meta name="viewport" content="width=device-width,minimum-scale=1">
-  <style amp-boilerplate>body{-webkit-animation:-amp-start 8s steps(1,end) 0s 1 normal both;-moz-animation:-amp-start 8s steps(1,end) 0s 1 normal both;-ms-animation:-amp-start 8s steps(1,end) 0s 1 normal both;animation:-amp-start 8s steps(1,end) 0s 1 normal both}@-webkit-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-moz-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-ms-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-o-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}</style><noscript><style amp-boilerplate>body{-webkit-animation:none;-moz-animation:none;-ms-animation:none;animation:none}</style></noscript>
-  <script async src="https://cdn.ampproject.org/v0.js"></script>
-  <script async custom-element="amp-experiment" src="https://cdn.ampproject.org/v0/amp-experiment-0.1.js"></script>
-  <script async custom-template="amp-mustache" src="https://cdn.ampproject.org/v0/amp-mustache-0.1.js"></script>
-  <style amp-custom>
-    h1 {
-      margin: 16px;
-    }
-  </style>
-</head>
-<body>
-  <h1>Hello, AMP world!</h1>
-  <amp-img width=360 heigh=200 layout=responsive src=image.png></amp-img>
-</body>
-</html>
-```
+...
+`
 
-Will be transformed to:
-
-```html
-<!DOCTYPE html>
-<html i-amphtml-layout="" i-amphtml-no-boilerplate="">
-<head>
-  <style amp-runtime=""></style>
-  <link rel="stylesheet" href="https://cdn.ampproject.org/v0.css">
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,minimum-scale=1">
-  <script async="" src="https://cdn.ampproject.org/v0.js"></script>
-  <script async="" custom-element="amp-experiment" src="https://cdn.ampproject.org/v0/amp-experiment-0.1.js"></script>
-  <script async="" custom-template="amp-mustache" src="https://cdn.ampproject.org/v0/amp-mustache-0.1.js"></script>
-  <style amp-custom="">
-    h1 {
-      margin: 16px;
-    }
-  </style>
-  <link rel="canonical" href="canonical.html">
-  <link rel="amphtml" href="canonical.amp.html">
-</head>
-<body>
-  <h1>Hello, AMP world!</h1>
-  <amp-img width="360" heigh="200" layout="responsive" src="image.png" class="i-amphtml-layout-responsive i-amphtml-layout-size-defined" i-amphtml-layout="responsive"></amp-img>
-</body>
-</html>
-```
-
-A few notable changes are:
-
-* The AMP attribute in the `html` tag gets removed as it's no longer valid AMP.
-* The AMP boilerplate gets removed. Instead the `v0.css` is added.
-* AMP layout classes are added to the `amp-img` extension.
-* `<link rel="amphtml" href="canonical.amp.html">` gets added linking to the valid AMP version.
-
-## Best Practices
-
-### Debugging
-
-Enable `verbose` mode to find out why the AMP boilerplate is not being removed.
-
-```
-// globally
-ampOptimizer.setConfig({
-  verbose: true
-});
-ampOptimizer.transformHtml(originalHtml, {
-  ampUrl: 'canonical.amp.html'
-})
-
-// per transformation
-ampOptimizer.transformHtml(originalHtml, {
+// Additional options can be passed as the second argument
+const optimizedHtml = await ampOptimizer.transformHtml(originalHtml, {
   ampUrl: 'canonical.amp.html',
-  verbose: true
-})
+  // this will rewrite https://cdn.ampproject.org/v0.js to /amp/v0.js
+  ampUrlPrefix: '/amp'
+});
+
+console.log(optimizedHtml);
 ```
 
-### Transform AMP pages at build time if possible
+### Fallback API for amp-geo
 
-Applying the transformations to an AMP file consumes additional server
-resources. Also, since the entire file is needed to apply the transformations,
-it also becomes impossible to stream the response while applying it.
+Ideally, when self-hosting the AMP framework, `amp-geo-0.1.js` should be patched at delivery time to replace `{{AMP_ISO_COUNTRY_HOTPATCH}}` with the ISO 3166-1 alpha-2 country code where the request originated ([reference](https://github.com/ampproject/amphtml/blob/main/spec/amp-cache-guidelines.md#guidelines-adding-a-new-cache-to-the-amp-ecosystem)). If your host does not have this capability, you can instead rely on a web API to return the country at runtime. The web API must be secure (HTTPS), adhere to [AMP CORS guidelines](https://amp.dev/documentation/guides-and-tutorials/learn/amp-caches-and-cors/amp-cors-requests/), and return JSON in the following format:
 
-In order to avoid server overhead, if the set of AMP files to be transformed is
-known in advance, transformations should be run at build time.
+```js
+{"country": "de"}
+```
 
-### Cache transformed AMPs
+where in this example, `de` is the ISO 3166-1 alpha-2 country code for Germany.
 
-Most websites have a more dynamic nature though and are not able to apply the
-transformations statically. For such cases it is possible to run the
-transformations after AMP pages are rendered, e.g. in an Express middleware.
+Example:
 
-To achieve best performance, those transformations shouldn't be applied for
-every request. Instead, transformations should only be applied the *first time*
-a page is requested, and the results then cached. Caching can happen on the CDN
-level, on the site's internal infrastructure (eg: Memcached), or even on the
-server itself, if the set of pages is small enough to fit in memory.
+```js
+const ampOptimizer = require('@ampproject/toolbox-optimizer');
 
-## Why is it faster?
+// The input string
+const originalHtml = `
+<!doctype html>
+<html ⚡>
+...
+`;
 
-In order to avoid Flash of Unstyled Content (FOUC) and reflows resulting from to the
-usage of web-components, AMP requires websites to add the amp-boilerplate in the header.
+const optimizedHtml = await ampOptimizer.transformHtml(originalHtml, {
+  // this will instruct amp-geo to fetch the user's country from an API
+  // which returns JSON in format: {"country": "de"}
+  geoApiUrl: 'https://example.com/geo'
+});
 
-The amp-boilerplate renders the page invisible by changing it's opacity, while
-the fonts and the AMP Runtime load. Once the AMP runtime is loaded, it is able
-to correctly set the sizes of the custom elements and once that happens, the
-runtimes makes the page visible again.
+console.log(optimizedHtml);
+```
 
-As a consequence, the first render of the page doesn't happen until the AMP
-Runtime is loaded.
+## Development & Testing
 
-To improve this, AMP server-side rendering applies the same rules as the
-AMP Runtime on the server. This ensures that the reflow will not happen  and
-the AMP boilerplate is no longer needed. The first render no longer depends on the
-AMP Runtime being loaded, which improves load times.
+AMP Optimizer uses a snapshot based testing approach. To execute the tests, run in the project root:
 
-## Caveats
+```shell
+$ npm run test:node
+```
 
-It's important to note that, even though the text content and layout will show
-faster, content that depends on the custom AMP elements (eg: any element in
-the page that starts with 'amp-') will only be visible after the AMP Runtime
-is loaded.
+Transformer tests are located in:
 
+```
+- spec/transformers/valid/TransformerName/test-name/
+    expected_output.html
+    input.html
+```
+
+The transformation input is defined in `input.html`, whereas `expected_output.html` contains the expected
+outcome of the transformation. Don't edit `expected_output.html` manually, instead, after changing
+a transformer implementation, run:
+
+```shell
+$ npm run test:optimizer:snapshot
+```
+
+to store a new snapshot version in `expected_output.html`.

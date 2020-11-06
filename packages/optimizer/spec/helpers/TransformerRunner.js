@@ -13,23 +13,35 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-const colors = require('colors/safe');
-const jsdiff = require('diff');
-const minify = require('html-minifier').minify;
 const {basename, join} = require('path');
-const {getFileContents, getDirectories} = require('../helpers/Utils.js');
+const {writeFileContents, getFileContents, getDirectories} = require('../helpers/Utils.js');
+
+const jsBeautify = require('js-beautify/js/lib/beautify-html.js');
+
+const BEAUTIFY_OPTIONS = {
+  'indent_size': 2,
+  'unformatted': ['noscript', 'style'],
+  'indent-char': ' ',
+  'no-preserve-newlines': '',
+  'extra_liners': [],
+};
 
 const treeParser = require('../../lib/TreeParser.js');
 
 const TRANSFORMER_PARAMS = {
-  verbose: true,
+  //verbose: true,
   ampUrl: 'https://example.com/amp-version.html',
 };
 
 const CONFIG_START_TOKEN = '<!--';
 const CONFIG_END_TOKEN = '-->';
 
-module.exports = function(testConfig) {
+const WRITE_SNAPSHOT = process.env.OPTIMIZER_SNAPSHOT;
+if (WRITE_SNAPSHOT) {
+  console.log('[AMP Optimizer Test] Creating new snapshot');
+}
+
+module.exports = function (testConfig) {
   describe(testConfig.name, () => {
     getDirectories(testConfig.testDir).forEach((testDir) => {
       it(basename(testDir), async (done) => {
@@ -41,55 +53,50 @@ module.exports = function(testConfig) {
           const indexStartConfig = CONFIG_START_TOKEN.length;
           const indexEndConfig = input.indexOf(CONFIG_END_TOKEN);
           const paramsString = input.substring(indexStartConfig, indexEndConfig);
-          params = JSON.parse(paramsString);
+          try {
+            params = JSON.parse(paramsString);
+          } catch (e) {
+            // no config
+          }
           // trim params from input string
           input = input.substring(indexEndConfig + CONFIG_END_TOKEN.length);
         }
-        const inputTree = treeParser.parse(input);
+
+        const tree = await treeParser.parse(input);
 
         // parse expected output
-        const expectedOutputPath =
-          testConfig.validAmp ? 'expected_output.valid.html' : 'expected_output.html';
-        const expectedOutput = getFileContents(join(testDir, expectedOutputPath));
+        const expectedOutputPath = join(
+          testDir,
+          testConfig.tag ? `expected_output.${testConfig.tag}.html` : 'expected_output.html'
+        );
+        let expectedOutput = '';
         try {
-          const expectedOutputTree = treeParser.parse(expectedOutput);
-          await testConfig.transformer.transform(inputTree, testConfig.validAmp ? {} : params);
-          compare(inputTree, expectedOutputTree, done);
-        } catch (error) {
-          done.fail(error);
+          expectedOutput = getFileContents(expectedOutputPath);
+        } catch (e) {
+          // file doesn't exist if no snapshot has been written yet
+          // that's ok as the test will fail by comparing to an empty string
         }
+        params = testConfig.validAmp ? {} : params;
+        params.validatorRules = await require('@ampproject/toolbox-validator-rules').fetch();
+        await testConfig.transformer.transform(tree, params);
+        const actualOutput = serialize(tree, params.__format);
+        if (WRITE_SNAPSHOT) {
+          writeFileContents(expectedOutputPath, actualOutput);
+        } else {
+          expect(actualOutput).toBe(expectedOutput);
+        }
+        done();
       });
     });
   });
 };
 
-function compare(actualTree, expectedTree, done) {
-  const actualHtml = serialize(actualTree);
-  const expectedHtml = serialize(expectedTree);
-  const diff = jsdiff.diffChars(expectedHtml, actualHtml);
-  let failed = false;
-  const reason = diff.map((part) => {
-    let string;
-    if (part.added) {
-      string = colors.green(part.value);
-      failed = true;
-    } else if (part.removed) {
-      string = colors.red(part.value);
-      failed = true;
-    } else {
-      string = colors.reset(part.value);
-    }
-    return string;
-  }).join('');
-
-  if (failed) {
-    done.fail('Trees do not match\n\n' + reason + '\n\nActual output:\n\n' + actualHtml + '\n\n');
-  } else {
-    done();
+function serialize(tree, format) {
+  let html = treeParser.serialize(tree);
+  if (format !== false) {
+    // whitespace is important for some tests, these can disable auto formatting via
+    // `<!-- { __format: false } -->`
+    html = jsBeautify.html_beautify(html, BEAUTIFY_OPTIONS);
   }
-}
-
-function serialize(tree) {
-  const html = treeParser.serialize(tree);
-  return minify(html, {collapseWhitespace: true});
+  return html;
 }

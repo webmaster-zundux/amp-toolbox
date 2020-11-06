@@ -14,15 +14,18 @@
  * limitations under the License.
  */
 
+const isDependencyInstalled = require('../isDependencyInstalled');
+
+const {createElement, appendChild, nextNode, firstChildByTag} = require('../NodeUtils');
 const {URL} = require('url');
 
 const {skipNodeAndChildren} = require('../HtmlDomHelper');
 const PathResolver = require('../PathResolver');
-const log = require('../log').tag('AddBlurryImagePlaceholders');
 
 const PIXEL_TARGET = 60;
 const MAX_BLURRED_PLACEHOLDERS = 100;
 const DEFAULT_CACHED_PLACEHOLDERS = 30;
+const CACHE_ALL_PLACEHOLDERS = -1;
 
 const ESCAPE_TABLE = {
   '#': '%23',
@@ -30,20 +33,11 @@ const ESCAPE_TABLE = {
   ':': '%3A',
   '<': '%3C',
   '>': '%3E',
-  '"': '\'',
+  '"': "'",
 };
 const ESCAPE_REGEX = new RegExp(Object.keys(ESCAPE_TABLE).join('|'), 'g');
 function escaper(match) {
   return ESCAPE_TABLE[match];
-}
-
-function isDependencyInstalled(dependency) {
-  try {
-    require.resolve(dependency);
-    return true;
-  } catch (err) {
-    return false;
-  }
 }
 
 /**
@@ -57,65 +51,79 @@ function isDependencyInstalled(dependency) {
  * This transformer supports the following option:
  *
  * * `blurredPlaceholders`: Enables blurry image placeholder generation. Default is `false`.
- * * `imageBasePath`: specifies a base path used to resolve an image during build.
+ * * `imageBasePath`: specifies a base path used to resolve an image during build. You can
+ *    also pass a function `(imgSrc, params) => '../img/' + imgSrc` for calculating the image path.
  * * `maxBlurredPlaceholders`: Specifies the max number of blurred images. Defaults to 5.
  * * `blurredPlaceholdersCacheSize`: Specifies the max number of blurred images to be cached
- *   to avoid expensive recalculation. Set to 0 if all placeholders should be cached. Defaults
- *   to 30.
+ *   to avoid expensive recalculation. Set to 0 if caching should be disabled. Set to -1 if
+ *   all placeholders should be cached (good for static sites). Defaults to 30.
  *
  * Important: blurry image placeholder computation is expensive. Make sure to
  * only use it for static or cached pages.
  */
 class AddBlurryImagePlaceholders {
   constructor(config) {
+    this.log_ = config.log.tag('AddBlurryImagePlaceholders');
+
+    // setup implementation only if placeholder generation is enabled
+    this.blurredPlaceholders_ = !!config.blurredPlaceholders;
+    if (!this.blurredPlaceholders_) {
+      this.log_.debug('disabled');
+      return;
+    }
+
+    // check whether all required dependencies are installed
+    if (!isDependencyInstalled('jimp') || !isDependencyInstalled('lru-cache')) {
+      this.log_.warn(
+        'jimp and lru-cache need to be installed via `npm install jimp lru-cache` ' +
+          'for this transformer to work'
+      );
+      // we can't generate placeholders
+      this.blurredPlaceholders_ = false;
+      return;
+    }
+    this.jimp = require('jimp');
+
+    // use provided upper placeholder limit for fallback to default
+    this.maxBlurredPlaceholders_ = config.maxBlurredPlaceholders || MAX_BLURRED_PLACEHOLDERS;
+    // used for resolving image files
+    this.pathResolver_ = new PathResolver(config.imageBasePath);
+
+    // setup caching
     const maxCacheSize = config.blurredPlaceholdersCacheSize || DEFAULT_CACHED_PLACEHOLDERS;
-    this.maxCacheSize = maxCacheSize;
+    // use a Map if all placeholders should be cached
+    if (maxCacheSize === CACHE_ALL_PLACEHOLDERS) {
+      this.log_.debug('caching all placeholders');
+      this.cache_ = new Map();
+    } else if (maxCacheSize > 0) {
+      const LRU = require('lru-cache');
+      this.log_.debug('using LRU cache for regularily used placeholders', maxCacheSize);
+      // use a LRU cache otherwise
+      this.cache_ = new LRU({
+        max: maxCacheSize,
+      });
+    } else {
+      this.log_.debug('caching disabled');
+    }
   }
+
   /**
    * Parses the document to add blurred placedholders in all appropriate
    * locations.
-   * @param {TreeAdapter} tree A parse5 treeAdapter.
    * @param {Object} runtime parameters
    * @return {Array} An array of promises that all represents the resolution of
    * a blurred placeholder being added in an appropriate place.
    */
-  transform(tree, params) {
-    if (!params.blurredPlaceholders) {
+  transform(root, params) {
+    // Check if placeholders should be generated
+    if (!this.blurredPlaceholders_) {
       return;
     }
-
-    if (!isDependencyInstalled('jimp') || !isDependencyInstalled('lru-cache')) {
-      log.warn('jimp and lru-cache need to be installed via `npm install jimp lru-cache` ' +
-               'for this transformer to work');
-      return;
-    }
-
-    // This makes sure jimp is only required when the transform is enabled.
-    if (!this.jimp) {
-      this.jimp = require('jimp');
-    }
-
-    if (!this.cache) {
-      // use a Map if all placeholders should be cached (good for static sites)
-      if (this.maxCacheSize === 0) {
-        log.debug('caching all placeholders');
-        this.cache = new Map();
-      } else {
-        const LRU = require('lru-cache');
-        log.debug('using LRU cache for regularily used placeholders', this.maxCacheSize);
-        // use a LRU cache otherwise
-        this.cache = new LRU({
-          max: this.maxCacheSize,
-        });
-      }
-    }
-    params = params || {};
-    const pathResolver = new PathResolver(params.imageBasePath);
-    const html = tree.root.firstChildByTag('html');
-    const body = html.firstChildByTag('body');
+    const html = firstChildByTag(root, 'html');
+    const body = firstChildByTag(html, 'body');
     const promises = [];
     let placeholders = 0;
-    for (let node = body; node !== null; node = node.nextNode()) {
+    for (let node = body; node !== null; node = nextNode(node)) {
       const {tagName} = node;
       let src;
       if (tagName === 'template') {
@@ -131,14 +139,13 @@ class AddBlurryImagePlaceholders {
 
       if (this.shouldAddBlurryPlaceholder_(node, src, tagName)) {
         placeholders++;
-        const promise = this.addBlurryPlaceholder_(tree, src, pathResolver).then((img) => {
+        const promise = this.addBlurryPlaceholder_(src, params).then((img) => {
           node.attribs.noloading = '';
-          node.appendChild(img);
+          appendChild(node, img);
         });
         promises.push(promise);
 
-        const maxBlurredPlaceholders = params.maxBlurredPlaceholders || MAX_BLURRED_PLACEHOLDERS;
-        if (placeholders >= maxBlurredPlaceholders) {
+        if (placeholders >= this.maxBlurredPlaceholders_) {
           break;
         }
       }
@@ -147,26 +154,24 @@ class AddBlurryImagePlaceholders {
     return Promise.all(promises);
   }
 
-
   /**
    * Adds a child image that is a blurry placeholder.
-   * @param {TreeAdapter} tree A parse5 treeAdapter.
    * @param {String} src The image that the bitmap is based on.
-   * @param {Object} runtime parameters
    * @return {!Promise} A promise that signifies that the img has been updated
    * to have correct attributes to be a blurred placeholder along with the
    * placeholder itself.
    * @private
    */
-  addBlurryPlaceholder_(tree, src, pathResolver) {
-    const img = tree.createElement('img');
-    img.attribs.class = 'i-amphtml-blurry-placeholder';
-    img.attribs.placeholder = '';
-    img.attribs.src = src;
-    img.attribs.alt = '';
-    return this.getDataURI_(img, pathResolver)
-        .then((dataURI) => {
-          let svg = `<svg xmlns="http://www.w3.org/2000/svg"
+  async addBlurryPlaceholder_(src, params) {
+    const img = createElement('img', {
+      class: 'i-amphtml-blurry-placeholder',
+      placeholder: '',
+      src,
+      alt: '',
+    });
+    try {
+      const dataURI = await this.getCachedDataURI(src, params);
+      let svg = `<svg xmlns="http://www.w3.org/2000/svg"
                       xmlns:xlink="http://www.w3.org/1999/xlink"
                       viewBox="0 0 ${dataURI.width} ${dataURI.height}">
                       <filter id="b" color-interpolation-filters="sRGB">
@@ -181,59 +186,61 @@ class AddBlurryImagePlaceholders {
                       </image>
                     </svg>`;
 
-          // Optimizes dataURI length by deleting line breaks, and
-          // removing unnecessary spaces.
-          svg = svg.replace(/\s+/g, ' ');
-          svg = svg.replace(/> </g, '><');
-          svg = svg.replace(ESCAPE_REGEX, escaper);
+      // Optimizes dataURI length by deleting line breaks, and
+      // removing unnecessary spaces.
+      svg = svg.replace(/\s+/g, ' ');
+      svg = svg.replace(/> </g, '><');
+      svg = svg.replace(ESCAPE_REGEX, escaper);
 
-          img.attribs.src = 'data:image/svg+xml;charset=utf-8,' + svg;
-          log.debug(src, '[SUCCESS]');
-          return img;
-        })
-        .catch((err) => {
-          log.debug(img.attribs.src, '[FAIL]');
-          log.error(err.message);
-        });
+      img.attribs.src = 'data:image/svg+xml;charset=utf-8,' + svg;
+      this.log_.debug(src, '[SUCCESS]');
+    } catch (err) {
+      this.log_.debug(src, '[FAIL]');
+      this.log_.error(err.message);
+    }
+    return img;
+  }
+
+  /**
+   * Returns a cached dataURI if exists, otherwise creates a new one.
+   */
+  getCachedDataURI(src, params) {
+    const resolvedSrc = this.pathResolver_.resolve(src, params);
+    if (this.cache_) {
+      const dataURIPromise = this.cache_.get(resolvedSrc);
+      if (dataURIPromise) {
+        this.log_.debug(src, '[CACHE HIT]');
+        return dataURIPromise;
+      }
+      this.log_.debug(src, '[CACHE MISS]');
+    }
+    const dataURIPromise = this.getDataURI_(resolvedSrc);
+    if (this.cache_) {
+      // we cache the promise to ensure that multiple requests for the same image
+      // still use the cache
+      this.cache_.set(resolvedSrc, dataURIPromise);
+    }
+    return dataURIPromise;
   }
 
   /**
    * Creates the bitmap in a dataURI format.
-   * @param {Node} img The DOM element that needs a dataURI for the
+   * @param {string} the img src value
    * placeholder.
-   * @param {Object} runtime parameters
    * @return {!Promise} A promise that is resolved once the img's src is updated
    * to be a dataURI of a bitmap including width and height.
    * @private
    */
-  getDataURI_(img, pathResolver) {
-    const existingPlaceholder = this.cache.get(img.attribs.src);
-    if (existingPlaceholder) {
-      log.debug(img.attribs.src, '[CACHE HIT]');
-      return Promise.resolve(existingPlaceholder);
-    }
-    log.debug(img.attribs.src, '[CACHE MISS]');
-    const imageSrc = pathResolver.resolve(img.attribs.src);
-    let width;
-    let height;
-
-    return this.jimp.read(imageSrc)
-        .then((image) => {
-          const imgDimension = this.getBitmapDimensions_(image.bitmap.width, image.bitmap.height);
-          image.resize(imgDimension.width, imgDimension.height, this.jimp.RESIZE_BEZIER);
-          width = image.bitmap.width;
-          height = image.bitmap.height;
-          return image.getBase64Async('image/png');
-        })
-        .then((dataURI) => {
-          const result = {
-            src: dataURI,
-            width: width,
-            height: height,
-          };
-          this.cache.set(img.attribs.src, result);
-          return result;
-        });
+  async getDataURI_(src) {
+    const image = await this.jimp.read(src);
+    const imgDimension = this.getBitmapDimensions_(image.bitmap.width, image.bitmap.height);
+    image.resize(imgDimension.width, imgDimension.height, this.jimp.RESIZE_BEZIER);
+    const result = {
+      src: await image.getBase64Async('image/png'),
+      width: image.bitmap.width,
+      height: image.bitmap.height,
+    };
+    return result;
   }
 
   /**
@@ -271,9 +278,11 @@ class AddBlurryImagePlaceholders {
    * @private
    */
   hasPlaceholder_(node) {
-    return node.childNodes.find((child) => {
-      return child.attribs && child.attribs.placeholder !== undefined;
-    }) !== undefined;
+    return (
+      node.childNodes.find((child) => {
+        return child.attribs && child.attribs.placeholder !== undefined;
+      }) !== undefined
+    );
   }
 
   /**
@@ -321,7 +330,8 @@ class AddBlurryImagePlaceholders {
     // Checks if the image is a poster or a responsive image as these are the
     // two most common cases where blurred placeholders would be wanted.
     const isPoster = tagName == 'amp-video';
-    const isResponsiveImgWithLoading = tagName == 'amp-img' &&
+    const isResponsiveImgWithLoading =
+      tagName == 'amp-img' &&
       (node.attribs.layout == 'intrinsic' ||
         node.attribs.layout == 'responsive' ||
         node.attribs.layout == 'fill');

@@ -23,14 +23,11 @@ const MockLogger = require('../helpers/MockLogger');
 describe('Version', () => {
   const mockLogger = new MockLogger();
 
-  it('prints the version', (done) => {
+  it('prints the version', () => {
     mockLogger.clear();
-    versionCmd({}, mockLogger)
-        .then(() => {
-          const output = mockLogger.getLogs();
-          expect(output).toBe(`v${packageInfo.version}`);
-          done();
-        })
-        .catch((e) => done.fail(e));
+    return versionCmd({}, mockLogger).then(() => {
+      const output = mockLogger.getLogs();
+      expect(output).toBe(`v${packageInfo.version}`);
+    });
   });
 });

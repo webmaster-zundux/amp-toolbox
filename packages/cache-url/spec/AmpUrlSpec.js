@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+/* global window */
+
 'use strict';
 
 // Check if we are in a browser environment
@@ -27,7 +29,6 @@ if (typeof window !== 'undefined') {
   createCacheUrl = ampToolboxCacheUrl.createCacheUrl;
   createCurlsSubdomain = ampToolboxCacheUrl.createCurlsSubdomain;
 }
-
 
 describe('AmpUrl', () => {
   const domainSuffix = 'cdn.ampproject.org';
@@ -84,6 +85,11 @@ describe('AmpUrl', () => {
         });
       });
     });
+
+    it('transforms a url using the supportType parameter', async () => {
+      const result = await createCacheUrl(domainSuffix, 'https://www.example.com', 'viewer');
+      expect(result).toBe('https://www-example-com.cdn.ampproject.org/v/s/www.example.com');
+    });
   });
 
   describe('createCurlsSubdomain', () => {
@@ -113,7 +119,8 @@ describe('AmpUrl', () => {
         curlsSubdomain: '4lxc7wqq7b25walg4rdiil62veijrmqui5z3ept2lyfqqwpowryq',
       },
       {
-        url: 'https://itwasadarkandstormynight.therainfellintorrents.exceptatoccasionalintervalswhenitwascheckedby.aviolentgustofwindwhichsweptupthestreets.com',
+        url:
+          'https://itwasadarkandstormynight.therainfellintorrents.exceptatoccasionalintervalswhenitwascheckedby.aviolentgustofwindwhichsweptupthestreets.com',
         curlsSubdomain: 'dgz4cnrxufaulnwku4ow5biptyqnenjievjht56hd7wqinbdbteq',
       },
       // Wikipedia's example of an IDN: "bücher.ch" -> "bücher-ch".
@@ -133,6 +140,10 @@ describe('AmpUrl', () => {
       {
         url: 'https://hello.xn--4gbrim.xn----rmckbbajlc6dj7bxne2c.xn--wgbh1c',
         curlsSubdomain: 'a6h5moukddengbsjm77rvbosevwuduec2blkjva4223o4bgafgla',
+      },
+      {
+        url: 'https://en-us.example.com',
+        curlsSubdomain: '0-en--us-example-com-0',
       },
     ];
 

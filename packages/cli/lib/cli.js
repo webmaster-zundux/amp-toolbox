@@ -16,27 +16,90 @@
 
 'use strict';
 
+const buildOptions = require('minimist-options');
 const minimist = require('minimist');
-const {log} = require('amp-toolbox-core');
+const {log} = require('@ampproject/toolbox-core');
 
 class Cli {
-  constructor(logger=log) {
+  constructor(logger = log) {
     this.logger_ = logger;
   }
 
-  run(args) {
-    args = minimist(args);
-    const command = args._[0] || 'help';
+  run(argv) {
+    // First pass of minimist is just used to identify command
+    const command = minimist(argv)._[0] || 'help';
 
+    // Customize minimist options based on command
+    const minimistOptions = {};
     switch (command) {
+      case 'download':
+        Object.assign(
+          minimistOptions,
+          buildOptions({
+            clear: {
+              type: 'boolean',
+              default: true,
+            },
+            rtv: {
+              type: 'string',
+            },
+          })
+        );
+        break;
+      case 'optimize':
+        Object.assign(
+          minimistOptions,
+          buildOptions({
+            lts: {
+              type: 'boolean',
+              default: false,
+            },
+            rtv: {
+              type: 'string',
+            },
+          })
+        );
+      case 'runtime-version':
+        Object.assign(
+          minimistOptions,
+          buildOptions({
+            canary: {
+              type: 'boolean',
+              default: false,
+            },
+            lts: {
+              type: 'boolean',
+              default: false,
+            },
+          })
+        );
+        break;
+      default:
+        break;
+    }
+
+    // Re-run minimist with param option handling
+    const args = minimist(argv, minimistOptions);
+
+    // Execute command with arguments
+    switch (command) {
+      case 'curls':
+        return require('./cmds/curls')(args, this.logger_);
+      case 'download':
+        return require('./cmds/downloadRuntime')(args, this.logger_);
       case 'help':
         return require('./cmds/help')(args, this.logger_);
-      case 'version':
-        return require('./cmds/version')(args, this.logger_);
+      case 'lint':
+        return require('./cmds/lint')(argv, this.logger_);
+      case 'optimize':
+        const OptimizeCmd = require('./cmds/optimize.js');
+        return new OptimizeCmd().run(args, this.logger_);
       case 'runtime-version':
         return require('./cmds/runtimeVersion')(args, this.logger_);
       case 'update-cache':
         return require('./cmds/updateCache')(args, this.logger_);
+      case 'version':
+        return require('./cmds/version')(args, this.logger_);
       default:
         return Promise.reject(new Error(`"${command}" is not a valid command!`));
     }

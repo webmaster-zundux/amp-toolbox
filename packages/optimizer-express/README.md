@@ -1,17 +1,17 @@
 ## Introduction
 
-[![npm version](https://badge.fury.io/js/amp-toolbox-optimizer-express.svg)](https://badge.fury.io/js/amp-toolbox-optimizer-express)
+[![npm version](https://badge.fury.io/js/%40ampproject%2Ftoolbox-optimizer-express.svg)](https://badge.fury.io/js/%40ampproject%2Ftoolbox-optimizer-express)
 
 amp-optimizer-express is an [express](http://expressjs.com/) middleware that optimizes page load
 times for websites using AMP for their canonical pages. The middleware uses the same
 server-side-rendering optimizations as the Google AMP Cache.
 
-The middleware uses the [amp-optimizer](../optimizer) component to apply server-side-rendering on the fly.
+The middleware uses the [amp-optimizer](/packages/optimizer) component to apply server-side-rendering on the fly.
 
 ## How it works
 
 amp-optimizer-express intercepts the responses and replaces their content with a version that has been
-transformed by [amp-optimizer](../optimizer).
+transformed by [amp-optimizer](/packages/optimizer).
 
 As the server-side-rendered version of the content is not valid AMP, the component also
 provides the original content on an alternative URL. Server-side-rendering
@@ -37,6 +37,12 @@ An amphtml link will be added to the server-side-rendered version:
 
 ## Usage
 
+Install via:
+
+```
+$ npm install @ampproject/toolbox-optimizer-express
+```
+
 The AMP Optimizer Middleware can be used like any other express middleware.
 
 It is important that the middleware is used *before* the middleware or route that renders the page.
@@ -47,7 +53,7 @@ The example bellow will transform HTML being loaded by express-static:
 const express = require('express');
 const path = require('path');
 const app = express();
-const AmpOptimizerMiddleware = require('amp-toolbox-optimizer-express');
+const AmpOptimizerMiddleware = require('@ampproject/toolbox-optimizer-express');
 
 // It's important that the AmpOptimizerMiddleware is added *before* the static middleware.
 // This allows us to replace the parts needed before static handles the request.
